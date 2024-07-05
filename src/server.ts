@@ -130,21 +130,48 @@ app.post("/categories", (req: Request, res: Response) => {
 });
 
 app.get("/products", (req: Request, res: Response) => {
-  connection.query(
-    "SELECT * FROM products",
-    (err, results: RowDataPacket[]) => {
-      if (err) {
-        console.error("Error fetching products:", err);
-        res.status(500).send("Error fetching products.");
-      } else {
-        const formattedResults = results.map((product: any) => ({
-          ...product,
-          date: formatDate(new Date(product.date)),
-        }));
-        res.json(formattedResults);
-      }
+  const { search, startDate, endDate, page = 1, limit = 10 } = req.query as any;
+  const offset = (page - 1) * limit;
+
+  let query = "SELECT * FROM products WHERE 1=1";
+  const params: (string | number)[] = [];
+
+  if (search) {
+    query += " AND name LIKE ?";
+    params.push(`%${search}%`);
+  }
+  if (startDate && endDate) {
+    query += " AND date BETWEEN ? AND ?";
+    params.push(startDate, endDate);
+  }
+
+  query += " LIMIT ? OFFSET ?";
+  params.push(Number(limit), offset);
+
+  connection.query(query, params, (err, results: RowDataPacket[]) => {
+    if (err) {
+      console.error("Error fetching products:", err);
+      res.status(500).send("Error fetching products.");
+    } else {
+      const countQuery = "SELECT COUNT(*) as total FROM products WHERE 1=1";
+      connection.query(
+        countQuery,
+        params.slice(0, -2),
+        (countErr, countResults: RowDataPacket[]) => {
+          if (countErr) {
+            console.error("Error counting products:", countErr);
+            res.status(500).send("Error counting products.");
+          } else {
+            const total = countResults[0].total;
+            res.json({
+              products: results,
+              totalPages: Math.ceil(total / limit),
+            });
+          }
+        }
+      );
     }
-  );
+  });
 });
 
 app.post(
@@ -476,6 +503,7 @@ app.get("/product-transactions/:productId", (req: Request, res: Response) => {
     }
   });
 });
+
 
 // Fetch user settings
 app.get("/users/:id", authenticateJWT, (req: Request, res: Response) => {
