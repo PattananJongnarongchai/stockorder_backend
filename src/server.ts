@@ -48,6 +48,7 @@ const authenticateJWT = (req: Request, res: Response, next: NextFunction) => {
 
     jwt.verify(token, SECRET_KEY, (err: any, user: any) => {
       if (err) {
+        console.error("Token verification failed:", err);
         return res.sendStatus(403);
       }
 
@@ -55,9 +56,11 @@ const authenticateJWT = (req: Request, res: Response, next: NextFunction) => {
       next();
     });
   } else {
+    console.error("No authorization header present");
     res.sendStatus(401);
   }
 };
+
 
 // Set up multer for file uploads
 const storage = multer.diskStorage({
@@ -84,6 +87,19 @@ const upload = multer({
     }
   },
 });
+
+// Function to get user from database
+const getUserFromDatabase = (username: string): Promise<any> => {
+  return new Promise((resolve, reject) => {
+    const sql = "SELECT * FROM users WHERE username = ?";
+    connection.query(sql, [username], (err, results: RowDataPacket[]) => {
+      if (err) {
+        return reject(err);
+      }
+      resolve(results[0]);
+    });
+  });
+};
 
 app.get("/categories", (req: Request, res: Response) => {
   connection.query(
@@ -311,7 +327,7 @@ app.post("/checkout", authenticateJWT, (req: Request, res: Response) => {
 
           Promise.all(stockUpdatePromises)
             .then(() => {
-              res.status(200).send("Checkout successful.");
+              // res.status(200).send("Checkout successful.");
             })
             .catch((err) => {
               console.error("Error updating stock:", err);
@@ -344,41 +360,36 @@ app.post("/register", async (req: Request, res: Response) => {
   );
 });
 
-// User login
-app.post("/login", (req: Request, res: Response) => {
+// User login endpoint
+app.post("/login", async (req: Request, res: Response) => {
   const { username, password } = req.body;
 
-  console.log(`Attempting login for username: ${username}`);
+  try {
+    const user = await getUserFromDatabase(username);
 
-  const sql = "SELECT * FROM users WHERE username = ?";
-  connection.query(sql, [username], async (err, results: RowDataPacket[]) => {
-    if (err) {
-      console.error("Error fetching user:", err);
-      res.status(500).send("Error fetching user.");
-    } else if (results.length === 0) {
-      console.log("No user found with this username.");
-      res.status(401).send("Invalid credentials.");
-    } else {
-      const user = results[0];
-      console.log(`User found: ${JSON.stringify(user)}`);
-
-      const validPassword = await bcrypt.compare(password, user.password);
-      if (!validPassword) {
-        console.log("Password mismatch.");
-        res.status(401).send("Invalid credentials.");
-      } else {
-        console.log("Password match. Generating token.");
-        const token = jwt.sign(
-          { username: user.username, id: user.id },
-          SECRET_KEY,
-          {
-            expiresIn: "1h",
-          }
-        );
-        res.json({ token });
-      }
+    if (!user) {
+      return res.status(401).send("Invalid username or password");
     }
-  });
+
+    const isPasswordValid = bcrypt.compareSync(password, user.password);
+
+    if (!isPasswordValid) {
+      return res.status(401).send("Invalid username or password");
+    }
+
+    const token = jwt.sign(
+      { id: user.id, username: user.username },
+      SECRET_KEY,
+      {
+        expiresIn: "1h",
+      }
+    );
+
+    res.json({ token, user: { id: user.id, username: user.username } });
+  } catch (err) {
+    console.error("Error during login:", err);
+    res.status(500).send("Error during login");
+  }
 });
 
 app.get("/orders", (req: Request, res: Response) => {
@@ -405,7 +416,7 @@ app.get("/orders", (req: Request, res: Response) => {
   }
 
   query += ` LIMIT ? OFFSET ?`;
-  queryParams.push(limit, offset);
+  queryParams.push(Number(limit), offset);
 
   connection.query(query, queryParams, (err, results: RowDataPacket[]) => {
     if (err) {
@@ -423,7 +434,6 @@ app.get("/orders", (req: Request, res: Response) => {
     }
   });
 });
-
 
 app.get("/details/:orderId", (req: Request, res: Response) => {
   const { orderId } = req.params;
@@ -446,6 +456,118 @@ app.get("/details/:orderId", (req: Request, res: Response) => {
   });
 });
 
+app.get("/product-transactions/:productId", (req: Request, res: Response) => {
+  const { productId } = req.params;
+
+  const sql = `SELECT id, product_id, quantity, total_price, date, order_id, type 
+               FROM transactions 
+               WHERE product_id = ?`;
+
+  connection.query(sql, [productId], (err, results: RowDataPacket[]) => {
+    if (err) {
+      console.error("Error fetching product transactions:", err);
+      res.status(500).send("Error fetching product transactions.");
+    } else {
+      const formattedResults = results.map((transaction: any) => ({
+        ...transaction,
+        date: format(new Date(transaction.date), "yyyy-MM-dd HH:mm:ss"),
+      }));
+      res.json(formattedResults);
+    }
+  });
+});
+
+// Fetch user settings
+app.get("/users/:id", authenticateJWT, (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  const sql = "SELECT id, username FROM users WHERE id = ?";
+  connection.query(sql, [id], (err, results: RowDataPacket[]) => {
+    if (err) {
+      console.error("Error fetching user settings:", err);
+      return res.status(500).send("Error fetching user settings.");
+    }
+    if (results.length === 0) {
+      return res.status(404).send("User not found.");
+    }
+    res.json(results[0]);
+  });
+});
+
+// Update user settings
+app.put("/users/:id", authenticateJWT, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { username, password } = req.body;
+
+  const hashedPassword = await bcrypt.hash(password, 10);
+  const sql = "UPDATE users SET username = ?, password = ? WHERE id = ?";
+
+  connection.query(
+    sql,
+    [username, hashedPassword, id],
+    (err, results: OkPacket) => {
+      if (err) {
+        console.error("Error updating user settings:", err);
+        return res.status(500).send("Error updating user settings.");
+      }
+      res.status(200).send("User settings updated successfully.");
+    }
+  );
+});
+
+// Update password endpoint
+app.put(
+  "/users/:id/password",
+  authenticateJWT,
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { currentPassword, newPassword } = req.body;
+    const userId = (req as any).user.id;
+
+    if (parseInt(id) !== userId) {
+      return res.status(403).send("Forbidden.");
+    }
+
+    connection.query(
+      "SELECT password FROM users WHERE id = ?",
+      [id],
+      async (err, results: RowDataPacket[]) => {
+        if (err) {
+          console.error("Error fetching user:", err);
+          return res.status(500).send("Error fetching user.");
+        }
+
+        if (results.length === 0) {
+          return res.status(404).send("User not found.");
+        }
+
+        const user = results[0];
+        const validPassword = await bcrypt.compare(
+          currentPassword,
+          user.password
+        );
+
+        if (!validPassword) {
+          return res.status(400).send("Current password is incorrect.");
+        }
+
+        const hashedPassword = await bcrypt.hash(newPassword, 10);
+        connection.query(
+          "UPDATE users SET password = ? WHERE id = ?",
+          [hashedPassword, id],
+          (err: any) => {
+            if (err) {
+              console.error("Error updating password:", err);
+              return res.status(500).send("Error updating password.");
+            }
+
+            res.send("Password updated successfully.");
+          }
+        );
+      }
+    );
+  }
+);
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);

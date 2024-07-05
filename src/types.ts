@@ -10,3 +10,16 @@ export interface InventoryItem {
   sent: boolean;
   description: string;
 }
+// Add these definitions in your types.d.ts or directly in your relevant files
+interface CartItem {
+  product: {
+    id: number;
+    price: number;
+  };
+  quantity: number;
+}
+
+interface User {
+  id: number;
+  username: string;
+}
