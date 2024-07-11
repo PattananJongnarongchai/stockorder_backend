@@ -18,8 +18,8 @@ const SECRET_KEY = process.env.SECRET_KEY || "your_secret_key";
 app.use(cors());
 app.use(express.json());
 app.use(
-  "/public/images",
-  express.static(path.join(__dirname, "public/images"))
+  "/publics/images",
+  express.static(path.join(__dirname, "publics/images"))
 );
 
 const connection = mysql.createConnection({
@@ -65,7 +65,7 @@ const authenticateJWT = (req: Request, res: Response, next: NextFunction) => {
 // Set up multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const dir = path.join(__dirname, "public/images");
+    const dir = path.join(__dirname, "publics/images");
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
@@ -179,7 +179,7 @@ app.post(
   [upload.single("image")],
   (req: Request, res: Response) => {
     const { name, price, stock, category_id, description } = req.body;
-    const image = req.file ? `/public/images/${req.file.filename}` : "";
+    const image = req.file ? `/publics/images/${req.file.filename}` : "";
     const date = formatDate(new Date());
     const sql =
       "INSERT INTO products (name, price, stock, image, category_id, date, description) VALUES (?, ?, ?, ?, ?, ?, ?)";
@@ -222,7 +222,7 @@ app.put(
     const { id } = req.params;
     const { name, price, stock, category_id, description } = req.body;
     const image = req.file
-      ? `/public/images/${req.file.filename}`
+      ? `/publics/images/${req.file.filename}`
       : req.body.image;
     const date = formatDate(new Date());
     const sql =
