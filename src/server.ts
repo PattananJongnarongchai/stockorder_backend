@@ -18,8 +18,8 @@ const SECRET_KEY = process.env.SECRET_KEY || "your_secret_key";
 app.use(cors());
 app.use(express.json());
 app.use(
-  "/publics/images",
-  express.static(path.join(__dirname, "publics/images"))
+  "/public/images",
+  express.static(path.join(__dirname, "public/images"))
 );
 
 const connection = mysql.createConnection({
@@ -39,7 +39,6 @@ connection.connect((err) => {
 
 const formatDate = (date: Date): string => format(date, "yyyy-MM-dd");
 
-// Authentication Middleware
 const authenticateJWT = (req: Request, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
 
@@ -65,7 +64,7 @@ const authenticateJWT = (req: Request, res: Response, next: NextFunction) => {
 // Set up multer for file uploads
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const dir = path.join(__dirname, "publics/images");
+    const dir = path.join(__dirname, "public/images");
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
@@ -101,7 +100,7 @@ const getUserFromDatabase = (username: string): Promise<any> => {
   });
 };
 
-app.get("/categories", (req: Request, res: Response) => {
+app.get("/api/categories", (req: Request, res: Response) => {
   connection.query(
     "SELECT * FROM categories",
     (err, results: RowDataPacket[]) => {
@@ -115,7 +114,7 @@ app.get("/categories", (req: Request, res: Response) => {
   );
 });
 
-app.post("/categories", (req: Request, res: Response) => {
+app.post("/api/categories", (req: Request, res: Response) => {
   const { name } = req.body;
 
   const sql = "INSERT INTO categories (name) VALUES (?)";
@@ -129,7 +128,7 @@ app.post("/categories", (req: Request, res: Response) => {
   });
 });
 
-app.get("/products", (req: Request, res: Response) => {
+app.get("/api/products", (req: Request, res: Response) => {
   const { search, startDate, endDate, page = 1, limit = 10 } = req.query as any;
   const offset = (page - 1) * limit;
 
@@ -175,11 +174,11 @@ app.get("/products", (req: Request, res: Response) => {
 });
 
 app.post(
-  "/products",
+  "/api/products",
   [upload.single("image")],
   (req: Request, res: Response) => {
     const { name, price, stock, category_id, description } = req.body;
-    const image = req.file ? `/publics/images/${req.file.filename}` : "";
+    const image = req.file ? `/public/images/${req.file.filename}` : "";
     const date = formatDate(new Date());
     const sql =
       "INSERT INTO products (name, price, stock, image, category_id, date, description) VALUES (?, ?, ?, ?, ?, ?, ?)";
@@ -216,13 +215,13 @@ app.post(
 );
 
 app.put(
-  "/products/:id",
+  "/api/products/:id",
   upload.single("image"),
   (req: Request, res: Response) => {
     const { id } = req.params;
     const { name, price, stock, category_id, description } = req.body;
     const image = req.file
-      ? `/publics/images/${req.file.filename}`
+      ? `/public/images/${req.file.filename}`
       : req.body.image;
     const date = formatDate(new Date());
     const sql =
@@ -249,7 +248,7 @@ app.put(
   }
 );
 
-app.delete("/products/:id", (req: Request, res: Response) => {
+app.delete("/api/products/:id", (req: Request, res: Response) => {
   const { id } = req.params;
   const sql = "DELETE FROM products WHERE id = ?";
 
@@ -263,7 +262,7 @@ app.delete("/products/:id", (req: Request, res: Response) => {
   });
 });
 
-app.get("/history", (req: Request, res: Response) => {
+app.get("/api/history", (req: Request, res: Response) => {
   const sql = `SELECT orders.id as order_id, orders.date, orders.total_price, 
                transactions.product_id, transactions.quantity, 
                products.name, products.price
@@ -286,7 +285,7 @@ app.get("/history", (req: Request, res: Response) => {
   });
 });
 
-app.post("/checkout", authenticateJWT, (req: Request, res: Response) => {
+app.post("/api/checkout", authenticateJWT, (req: Request, res: Response) => {
   const { cartItems } = req.body;
   const user_id = (req as any).user.id;
 
@@ -366,29 +365,29 @@ app.post("/checkout", authenticateJWT, (req: Request, res: Response) => {
   );
 });
 
-// User registration
-app.post("/register", async (req: Request, res: Response) => {
-  const { username, password } = req.body;
+// User registration endpoint
+app.post("/api/register", async (req: Request, res: Response) => {
+  const { username, password, user_role = 'user' } = req.body;
 
   const hashedPassword = await bcrypt.hash(password, 10);
 
-  const sql = "INSERT INTO users (username, password) VALUES (?, ?)";
+  const sql = "INSERT INTO users (username, password, user_role) VALUES (?, ?, ?)";
   connection.query(
     sql,
-    [username, hashedPassword],
+    [username, hashedPassword, user_role],
     (err, results: OkPacket) => {
       if (err) {
         console.error("Error registering user:", err);
         res.status(500).send("Error registering user.");
       } else {
-        res.status(201).send({ id: results.insertId, username });
+        res.status(201).send({ id: results.insertId, username, user_role });
       }
     }
   );
 });
 
-// User login endpoint
-app.post("/login", async (req: Request, res: Response) => {
+
+app.post("/api/login", async (req: Request, res: Response) => {
   const { username, password } = req.body;
 
   try {
@@ -405,21 +404,25 @@ app.post("/login", async (req: Request, res: Response) => {
     }
 
     const token = jwt.sign(
-      { id: user.id, username: user.username },
+      { id: user.id, username: user.username, role: user.role }, // Include role in the token
       SECRET_KEY,
       {
         expiresIn: "1h",
       }
     );
 
-    res.json({ token, user: { id: user.id, username: user.username } });
+    res.json({
+      token,
+      user: { id: user.id, username: user.username, role: user.role },
+    }); // Include role in the response
   } catch (err) {
     console.error("Error during login:", err);
     res.status(500).send("Error during login");
   }
 });
 
-app.get("/orders", (req: Request, res: Response) => {
+
+app.get("/api/orders", (req: Request, res: Response) => {
   const {
     startDate,
     endDate,
@@ -462,7 +465,7 @@ app.get("/orders", (req: Request, res: Response) => {
   });
 });
 
-app.get("/details/:orderId", (req: Request, res: Response) => {
+app.get("/api/details/:orderId", (req: Request, res: Response) => {
   const { orderId } = req.params;
 
   const sql = `SELECT id, product_id, quantity, total_price, date, order_id, type 
@@ -483,30 +486,120 @@ app.get("/details/:orderId", (req: Request, res: Response) => {
   });
 });
 
-app.get("/product-transactions/:productId", (req: Request, res: Response) => {
-  const { productId } = req.params;
+app.get(
+  "/api/product-transactions/:productId",
+  (req: Request, res: Response) => {
+    const { productId } = req.params;
 
-  const sql = `SELECT id, product_id, quantity, total_price, date, order_id, type 
+    const sql = `SELECT id, product_id, quantity, total_price, date, order_id, type 
                FROM transactions 
                WHERE product_id = ?`;
 
-  connection.query(sql, [productId], (err, results: RowDataPacket[]) => {
+    connection.query(sql, [productId], (err, results: RowDataPacket[]) => {
+      if (err) {
+        console.error("Error fetching product transactions:", err);
+        res.status(500).send("Error fetching product transactions.");
+      } else {
+        const formattedResults = results.map((transaction: any) => ({
+          ...transaction,
+          date: format(new Date(transaction.date), "yyyy-MM-dd HH:mm:ss"),
+        }));
+        res.json(formattedResults);
+      }
+    });
+  }
+);
+app.get("/api/user-orders/:userId", (req: Request, res: Response) => {
+  const { userId } = req.params;
+  const { startDate, endDate } = req.query;
+
+  const sql = `
+    SELECT DATE(date) as date, SUM(total_price) as total
+    FROM orders
+    WHERE user_id = ? AND date BETWEEN ? AND ?
+    GROUP BY DATE(date)
+    ORDER BY DATE(date)
+  `;
+
+  connection.query(
+    sql,
+    [userId, startDate, endDate],
+    (err, results: RowDataPacket[]) => {
+      if (err) {
+        console.error("Error fetching user orders:", err);
+        return res.status(500).send("Error fetching user orders.");
+      }
+      res.json(results);
+    }
+  );
+});
+// Fetch all user transactions for admin
+app.get("/api/admin/user-transactions", authenticateJWT, (req: Request, res: Response) => {
+  const { role } = (req as any).user;
+
+  if (role !== "admin") {
+    return res.status(403).send("Access denied");
+  }
+
+  const sql = `SELECT u.id as user_id, u.username, t.date, 
+                SUM(t.total_price) as total_price 
+                FROM users u
+                JOIN transactions t ON u.id = t.user_id
+                GROUP BY u.id, DATE(t.date)
+                ORDER BY t.date DESC`;
+
+  connection.query(sql, (err, results: RowDataPacket[]) => {
     if (err) {
-      console.error("Error fetching product transactions:", err);
-      res.status(500).send("Error fetching product transactions.");
+      console.error("Error fetching user transactions:", err);
+      res.status(500).send("Error fetching user transactions.");
     } else {
-      const formattedResults = results.map((transaction: any) => ({
-        ...transaction,
-        date: format(new Date(transaction.date), "yyyy-MM-dd HH:mm:ss"),
-      }));
-      res.json(formattedResults);
+      res.json(results);
+    }
+  });
+});
+
+// Fetch all user transactions for admin
+app.get("/api/admin/user-transactions", authenticateJWT, (req: Request, res: Response) => {
+  const { role } = (req as any).user;
+  const { startDate, endDate, page = 1, limit = 10 } = req.query as any;
+
+  if (role !== "admin") {
+    return res.status(403).send("Access denied");
+  }
+
+  const offset = (page - 1) * limit;
+
+  let query = `SELECT u.id as user_id, u.username, DATE(t.date) as date, 
+                SUM(t.total_price) as total_price 
+                FROM users u
+                JOIN transactions t ON u.id = t.user_id
+                WHERE 1=1`;
+  const queryParams: any[] = [];
+
+  if (startDate && endDate) {
+    query += ` AND DATE(t.date) BETWEEN ? AND ?`;
+    queryParams.push(startDate, endDate);
+  }
+
+  query += ` GROUP BY u.id, DATE(t.date)
+             ORDER BY DATE(t.date) DESC
+             LIMIT ? OFFSET ?`;
+  queryParams.push(Number(limit), offset);
+
+  connection.query(query, queryParams, (err, results: RowDataPacket[]) => {
+    if (err) {
+      console.error("Error fetching user transactions:", err);
+      res.status(500).send("Error fetching user transactions.");
+    } else {
+      res.json(results);
     }
   });
 });
 
 
+
 // Fetch user settings
-app.get("/users/:id", authenticateJWT, (req: Request, res: Response) => {
+app.get("/api/users/:id", authenticateJWT, (req: Request, res: Response) => {
   const { id } = req.params;
 
   const sql = "SELECT id, username FROM users WHERE id = ?";
@@ -523,29 +616,33 @@ app.get("/users/:id", authenticateJWT, (req: Request, res: Response) => {
 });
 
 // Update user settings
-app.put("/users/:id", authenticateJWT, async (req: Request, res: Response) => {
-  const { id } = req.params;
-  const { username, password } = req.body;
+app.put(
+  "/api/users/:id",
+  authenticateJWT,
+  async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const { username, password } = req.body;
 
-  const hashedPassword = await bcrypt.hash(password, 10);
-  const sql = "UPDATE users SET username = ?, password = ? WHERE id = ?";
+    const hashedPassword = await bcrypt.hash(password, 10);
+    const sql = "UPDATE users SET username = ?, password = ? WHERE id = ?";
 
-  connection.query(
-    sql,
-    [username, hashedPassword, id],
-    (err, results: OkPacket) => {
-      if (err) {
-        console.error("Error updating user settings:", err);
-        return res.status(500).send("Error updating user settings.");
+    connection.query(
+      sql,
+      [username, hashedPassword, id],
+      (err, results: OkPacket) => {
+        if (err) {
+          console.error("Error updating user settings:", err);
+          return res.status(500).send("Error updating user settings.");
+        }
+        res.status(200).send("User settings updated successfully.");
       }
-      res.status(200).send("User settings updated successfully.");
-    }
-  );
-});
+    );
+  }
+);
 
 // Update password endpoint
 app.put(
-  "/users/:id/password",
+  "/api/users/:id/password",
   authenticateJWT,
   async (req: Request, res: Response) => {
     const { id } = req.params;
