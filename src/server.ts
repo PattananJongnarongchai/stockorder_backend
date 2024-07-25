@@ -129,8 +129,7 @@ app.post("/api/categories", (req: Request, res: Response) => {
 });
 
 app.get("/api/products", (req: Request, res: Response) => {
-  const { search, startDate, endDate, page = 1, limit = 10 } = req.query as any;
-  const offset = (page - 1) * limit;
+  const { search, startDate, endDate } = req.query as any;
 
   let query = "SELECT * FROM products WHERE 1=1";
   const params: (string | number)[] = [];
@@ -144,34 +143,18 @@ app.get("/api/products", (req: Request, res: Response) => {
     params.push(startDate, endDate);
   }
 
-  query += " LIMIT ? OFFSET ?";
-  params.push(Number(limit), offset);
-
   connection.query(query, params, (err, results: RowDataPacket[]) => {
     if (err) {
       console.error("Error fetching products:", err);
       res.status(500).send("Error fetching products.");
     } else {
-      const countQuery = "SELECT COUNT(*) as total FROM products WHERE 1=1";
-      connection.query(
-        countQuery,
-        params.slice(0, -2),
-        (countErr, countResults: RowDataPacket[]) => {
-          if (countErr) {
-            console.error("Error counting products:", countErr);
-            res.status(500).send("Error counting products.");
-          } else {
-            const total = countResults[0].total;
-            res.json({
-              products: results,
-              totalPages: Math.ceil(total / limit),
-            });
-          }
-        }
-      );
+      res.json({
+        products: results,
+      });
     }
   });
 });
+
 
 app.post(
   "/api/products",
@@ -262,28 +245,28 @@ app.delete("/api/products/:id", (req: Request, res: Response) => {
   });
 });
 
-app.get("/api/history", (req: Request, res: Response) => {
-  const sql = `SELECT orders.id as order_id, orders.date, orders.total_price, 
-               transactions.product_id, transactions.quantity, 
-               products.name, products.price
-               FROM orders
-               JOIN transactions ON orders.id = transactions.order_id
-               JOIN products ON transactions.product_id = products.id`;
+// app.get("/api/history", (req: Request, res: Response) => {
+//   const sql = `SELECT orders.id as order_id, orders.date, orders.total_price, 
+//                transactions.product_id, transactions.quantity, 
+//                products.name, products.price
+//                FROM orders
+//                JOIN transactions ON orders.id = transactions.order_id
+//                JOIN products ON transactions.product_id = products.id`;
 
-  connection.query(sql, (err, results: RowDataPacket[]) => {
-    if (err) {
-      console.error("Error fetching history:", err);
-      res.status(500).send("Error fetching history.");
-    } else {
-      const transactions = results.map((transaction: any) => ({
-        ...transaction,
-        price: parseFloat(transaction.price),
-        date: formatDate(new Date(transaction.date)),
-      }));
-      res.json(transactions);
-    }
-  });
-});
+//   connection.query(sql, (err, results: RowDataPacket[]) => {
+//     if (err) {
+//       console.error("Error fetching history:", err);
+//       res.status(500).send("Error fetching history.");
+//     } else {
+//       const transactions = results.map((transaction: any) => ({
+//         ...transaction,
+//         price: parseFloat(transaction.price),
+//         date: formatDate(new Date(transaction.date)),
+//       }));
+//       res.json(transactions);
+//     }
+//   });
+// });
 
 app.post("/api/checkout", authenticateJWT, (req: Request, res: Response) => {
   const { cartItems } = req.body;
@@ -693,6 +676,52 @@ app.put(
     );
   }
 );
+app.get("/api/history", (req: Request, res: Response) => {
+  const { search, startDate, endDate, page = 1, limit = 10 } = req.query as any;
+  const offset = (page - 1) * limit;
+
+  let query = "SELECT * FROM products WHERE 1=1";
+  const params: (string | number)[] = [];
+
+  if (search) {
+    query += " AND name LIKE ?";
+    params.push(`%${search}%`);
+  }
+  if (startDate && endDate) {
+    query += " AND date BETWEEN ? AND ?";
+    params.push(startDate, endDate);
+  }
+
+  query += " LIMIT ? OFFSET ?";
+  params.push(Number(limit), offset);
+
+  connection.query(query, params, (err, results: RowDataPacket[]) => {
+    if (err) {
+      console.error("Error fetching products:", err);
+      res.status(500).send("Error fetching products.");
+    } else {
+      const countQuery = "SELECT COUNT(*) as total FROM products WHERE 1=1";
+      const countParams = params.slice(0, -2); // Remove LIMIT and OFFSET parameters
+      connection.query(
+        countQuery,
+        countParams,
+        (countErr, countResults: RowDataPacket[]) => {
+          if (countErr) {
+            console.error("Error counting products:", countErr);
+            res.status(500).send("Error counting products.");
+          } else {
+            const total = countResults[0].total;
+            res.json({
+              products: results,
+              totalPages: Math.ceil(total / limit),
+            });
+          }
+        }
+      );
+    }
+  });
+});
+
 
 app.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
