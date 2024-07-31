@@ -579,6 +579,16 @@ app.get("/api/admin/user-transactions", authenticateJWT, (req: Request, res: Res
   });
 });
 
+app.get("/api/users", (req: Request, res: Response) => {
+  connection.query("SELECT * FROM users", (err, results: RowDataPacket[]) => {
+    if (err) {
+      console.error("Error fetching users:", err);
+      res.status(500).send("Error fetching users.");
+    } else {
+      res.json(results);
+    }
+  });
+});
 
 
 // Fetch user settings
@@ -719,6 +729,51 @@ app.get("/api/history", (req: Request, res: Response) => {
         }
       );
     }
+  });
+});
+app.get('/api/sales', (req: Request, res: Response) => {
+  const { id, startDate, endDate } = req.query;
+
+  if (!id) {
+    return res.status(400).json({ error: 'User ID is required' });
+  }
+
+  const userQuery = 'SELECT * FROM users WHERE id = ?';
+  const salesQuery = `
+    SELECT DATE(date) as date, SUM(total_price) as total
+    FROM orders
+    WHERE user_id = ? AND date BETWEEN ? AND ?
+    GROUP BY DATE(date)
+    ORDER BY DATE(date)
+  `;
+
+  connection.query(userQuery, [id], (err, userResults: RowDataPacket[]) => {
+    if (err) {
+      console.error('Error fetching user:', err);
+      return res.status(500).json({ error: 'Internal server error' });
+    }
+
+    if (userResults.length === 0) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+
+    const user = userResults[0];
+    const start = startDate || '2022-01-01';
+    const end = endDate || '2022-12-31';
+
+    connection.query(salesQuery, [id, start, end], (err, salesResults: RowDataPacket[]) => {
+      if (err) {
+        console.error('Error fetching sales:', err);
+        return res.status(500).json({ error: 'Internal server error' });
+      }
+
+      const formattedResults = salesResults.map((sale) => ({
+        ...sale,
+        date: format(new Date(sale.date), 'yyyy-MM-dd'),
+      }));
+
+      res.status(200).json({ user, sales: formattedResults });
+    });
   });
 });
 
